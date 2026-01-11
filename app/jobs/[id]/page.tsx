@@ -3,288 +3,168 @@ import 'server-only';
 import { notFound } from 'next/navigation';
 import { headers as nextHeaders } from 'next/headers';
 
+import { getServerAuthContext } from '@/lib/auth';
+import { getSignedReadUrl } from '@/lib/storage/readUrl';
+import { prisma } from '@/lib/db';
+
+import type { JobDetailViewModel } from '@/components/jobs/detail/types';
+import { JobCompliance } from '@/components/jobs/detail/JobCompliance';
+import { JobHeader } from '@/components/jobs/detail/JobHeader';
+import { JobImageGallery } from '@/components/jobs/detail/JobImageGallery';
+import { JobLocation } from '@/components/jobs/detail/JobLocation';
+import { JobOverview } from '@/components/jobs/detail/JobOverview';
+import { JobPricing } from '@/components/jobs/detail/JobPricing';
+import { JobScope } from '@/components/jobs/detail/JobScope';
+import { JobTiming } from '@/components/jobs/detail/JobTiming';
+import { StickyActionBar } from '@/components/jobs/detail/StickyActionBar';
+
 type PageProps = {
   params: { id: string };
 };
 
-type JobPhoto = {
-  id: string;
-  label: string;
-  signedUrl: string;
-  createdAt: string;
-};
-
-type JobDocument = {
-  id: string;
-  name: string;
-  kind: string;
-  signedUrl: string;
-  createdAt: string;
-};
-
-type JobRequestDetail = {
-  id: string;
-  ownerCompanyId: string;
-  title: string;
-  jobType: string;
-  commodity: string;
-  urgency: string;
-  scopeDescription: string;
-  descriptionFull: string;
-  status: string;
-
-  startDate: string | null;
-  expectedDuration: string | null;
-
-  address: string;
-  city: string;
-  state: string;
-  latitude: number;
-  longitude: number;
-
-  complianceRequirements: string[];
-
-  equipmentNotes: string | null;
-  laborNotes: string | null;
-
-  pricingExpectation: string | null;
-
-  photos: JobPhoto[];
-  documents: JobDocument[];
-
-  createdAt: string;
-  updatedAt: string;
-};
-
-function getForwardedAuthHeaders(): HeadersInit {
-  const h = nextHeaders();
-  const required = ['x-user-id', 'x-user-role', 'x-company-id', 'x-subscription-active'] as const;
-  const out = new Headers();
-  for (const key of required) {
-    const value = h.get(key);
-    if (value === null || value.trim() === '') {
-      throw new Error(`Missing required auth header: ${key}`);
-    }
-    out.set(key, value);
-  }
-  return out;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const isOpen = status === 'open';
+function Blocked({ title, message }: { title: string; message: string }) {
   return (
-    <span
-      className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold uppercase ${
-        isOpen ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-      }`}
-    >
-      {isOpen ? 'Open' : 'Closed'}
-    </span>
+    <main className="min-h-screen bg-gray-50">
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
+        <div className="bg-white border rounded-lg p-6 text-sm text-gray-800">BLOCKED: {message}</div>
+      </div>
+    </main>
   );
 }
 
-export default async function Page({ params }: PageProps) {
-  const id = params.id;
-  const baseUrl = process.env.APP_BASE_URL;
+function formatPostedLabel(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const days = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+  if (days === 0) return 'Today';
+  if (days === 1) return '1 day ago';
+  return `${days} days ago`;
+}
 
-  if (!baseUrl) {
-    return (
-      <main className="mx-auto max-w-4xl px-4 py-10">
-        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          ERROR: APP_BASE_URL is missing.
-        </div>
-      </main>
-    );
-  }
-
-  let authHeaders: HeadersInit;
-  try {
-    authHeaders = getForwardedAuthHeaders();
-  } catch (err) {
-    return (
-      <main className="mx-auto max-w-4xl px-4 py-10">
-        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          BLOCKED: {err instanceof Error ? err.message : String(err)}
-        </div>
-      </main>
-    );
-  }
-
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}/api/jobs/${encodeURIComponent(id)}`, {
-      cache: 'no-store',
-      headers: authHeaders,
-    });
-  } catch (err) {
-    return (
-      <main className="mx-auto max-w-4xl px-4 py-10">
-        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          ERROR: Backend unreachable. {err instanceof Error ? err.message : String(err)}
-        </div>
-      </main>
-    );
-  }
-
-  if (res.status === 404) {
+export default async function JobDetailPage({ params }: PageProps) {
+  const jobRequestId = params?.id;
+  if (!jobRequestId || typeof jobRequestId !== 'string' || jobRequestId.trim().length === 0) {
     notFound();
   }
 
-  if (res.status === 403) {
-    const text = await res.text();
+  let auth;
+  try {
+    auth = getServerAuthContext({ headers: nextHeaders() });
+  } catch (err) {
+    return <Blocked title="Job Request" message={err instanceof Error ? err.message : String(err)} />;
+  }
+
+  const job = await prisma.jobRequest.findUnique({
+    where: { id: jobRequestId },
+    include: {
+      photos: { orderBy: { createdAt: 'asc' } },
+      documents: { orderBy: { createdAt: 'asc' } },
+    },
+  });
+
+  if (!job) notFound();
+
+  const status = job.status === 'open' || job.status === 'closed' ? job.status : null;
+  if (!status) {
+    return <Blocked title="Job Request" message='Persisted JobRequest.status must be "open" or "closed".' />;
+  }
+
+  const urgency = job.urgency === 'urgent' || job.urgency === 'scheduled' ? job.urgency : null;
+  if (!urgency) {
+    return <Blocked title="Job Request" message='Persisted JobRequest.urgency must be "urgent" or "scheduled".' />;
+  }
+
+  if (auth.role === 'contractor') {
+    if (auth.subscriptionActive !== true) {
+      return <Blocked title="Job Request" message="Access denied: contractor subscription is not active." />;
+    }
+    if (status !== 'open') {
+      return <Blocked title="Job Request" message="Access denied: contractors can only view open job requests." />;
+    }
+  } else if (auth.role === 'logistics_company') {
+    if (auth.companyId !== job.ownerCompanyId) {
+      return <Blocked title="Job Request" message="Access denied: logistics company does not own this job request." />;
+    }
+  } else {
+    return <Blocked title="Job Request" message="Access denied: unknown role." />;
+  }
+
+  const bucket = process.env.FILE_STORAGE_BUCKET;
+  if (!bucket) {
+    return <Blocked title="Job Request" message="FILE_STORAGE_BUCKET missing; cannot generate signed read URLs." />;
+  }
+
+  let signedPhotos: Array<{ src: string; alt: string }>;
+  try {
+    signedPhotos = await Promise.all(
+      job.photos.map(async (p) => {
+        const signedUrl = await getSignedReadUrl({ bucket, key: p.s3Key, expiresInSeconds: 60 });
+        return { src: signedUrl, alt: p.label || 'Job photo' };
+      }),
+    );
+  } catch (err) {
     return (
-      <main className="mx-auto max-w-4xl px-4 py-10">
-        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          BLOCKED: {text || 'Access denied.'}
-        </div>
-      </main>
+      <Blocked
+        title="Job Request"
+        message={`Failed to generate signed read URLs for photos. ${err instanceof Error ? err.message : String(err)}`}
+      />
     );
   }
 
-  if (res.status >= 500) {
-    const text = await res.text();
-    return (
-      <main className="mx-auto max-w-4xl px-4 py-10">
-        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          ERROR: {text || `Server error (status ${res.status}).`}
-        </div>
-      </main>
-    );
-  }
+  const viewModel: JobDetailViewModel = {
+    id: job.id,
+    title: job.title,
+    companyName: job.ownerCompanyId,
+    urgency,
+    status,
+    postedDateLabel: formatPostedLabel(job.createdAt),
 
-  if (!res.ok) {
-    const text = await res.text();
-    return (
-      <main className="mx-auto max-w-4xl px-4 py-10">
-        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          ERROR: {text || `Request failed (status ${res.status}).`}
-        </div>
-      </main>
-    );
-  }
+    jobType: job.jobType,
+    commodity: job.commodity,
+    volumeLabel: 'Not provided.',
 
-  const job = (await res.json()) as JobRequestDetail;
-  const startDate = job.startDate ? new Date(job.startDate) : null;
+    addressLine: job.address,
+    cityStateLine: `${job.city}, ${job.state}`,
+    facilityNameLabel: 'Not provided.',
+    gateInstructionsLabel: 'Not provided.',
+    ppeRequirementsLabel: 'Not provided.',
+    clearanceNotesLabel: 'Not provided.',
+    railAccessNotesLabel: 'Not provided.',
+
+    scopeFull: job.descriptionFull,
+    equipmentNotesLabel: job.equipmentNotes ?? 'Not provided.',
+    laborNotesLabel: job.laborNotes ?? 'Not provided.',
+
+    complianceRequired: job.complianceRequirements,
+    complianceOptional: [],
+
+    startDateLabel: job.startDate ? job.startDate.toLocaleString() : 'Not provided.',
+    durationLabel: job.expectedDuration ?? 'Not provided.',
+    workHoursLabel: 'Not provided.',
+
+    pricingExpectationLabel: job.pricingExpectation ?? 'Not provided.',
+    pricingNotesLabel: 'Not provided.',
+
+    photos: signedPhotos,
+
+    isOwner: auth.role === 'logistics_company' && auth.companyId === job.ownerCompanyId,
+    role: auth.role,
+  };
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-10">
-      <header className="space-y-2">
-        <div className="flex items-start justify-between gap-3">
-          <h1 className="text-2xl font-semibold text-gray-900">{job.title}</h1>
-          <StatusBadge status={job.status} />
-        </div>
-        <div className="text-sm text-gray-700">
-          <span className="font-semibold text-gray-900">Company:</span> {job.ownerCompanyId}
-        </div>
-      </header>
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-8 pb-24">
+        <JobHeader job={viewModel} />
+        <JobImageGallery job={viewModel} />
+        <JobOverview job={viewModel} />
+        <JobLocation job={viewModel} />
+        <JobScope job={viewModel} />
+        <JobCompliance job={viewModel} />
+        <JobTiming job={viewModel} />
+        <JobPricing job={viewModel} />
+      </div>
 
-      <section className="mt-6 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900">Location &amp; Timing</h2>
-        <div className="mt-2 space-y-1 text-sm text-gray-800">
-          <div>
-            <span className="font-medium text-gray-700">Address:</span> {job.address}, {job.city}, {job.state}
-          </div>
-          {startDate ? (
-            <div>
-              <span className="font-medium text-gray-700">Start date:</span> {startDate.toLocaleString()}
-            </div>
-          ) : null}
-          {job.expectedDuration ? (
-            <div>
-              <span className="font-medium text-gray-700">Expected duration:</span> {job.expectedDuration}
-            </div>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="mt-6 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900">Scope &amp; Description</h2>
-        <div className="mt-3 space-y-4 text-sm text-gray-800">
-          <div>
-            <div className="font-medium text-gray-700">Scope</div>
-            <div className="whitespace-pre-wrap">{job.scopeDescription}</div>
-          </div>
-          <div>
-            <div className="font-medium text-gray-700">Description</div>
-            <div className="whitespace-pre-wrap">{job.descriptionFull}</div>
-          </div>
-        </div>
-      </section>
-
-      <section className="mt-6 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900">Compliance</h2>
-        {job.complianceRequirements.length > 0 ? (
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-800">
-            {job.complianceRequirements.map((req) => (
-              <li key={req}>{req}</li>
-            ))}
-          </ul>
-        ) : (
-          <div className="mt-2 text-sm text-gray-700">No compliance requirements listed.</div>
-        )}
-      </section>
-
-      {job.equipmentNotes || job.laborNotes ? (
-        <section className="mt-6 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">Operational Notes</h2>
-          <div className="mt-2 space-y-3 text-sm text-gray-800">
-            {job.equipmentNotes ? (
-              <div>
-                <div className="font-medium text-gray-700">Equipment notes</div>
-                <div className="whitespace-pre-wrap">{job.equipmentNotes}</div>
-              </div>
-            ) : null}
-            {job.laborNotes ? (
-              <div>
-                <div className="font-medium text-gray-700">Labor notes</div>
-                <div className="whitespace-pre-wrap">{job.laborNotes}</div>
-              </div>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="mt-6 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900">Media</h2>
-
-        <div className="mt-3">
-          <div className="text-sm font-semibold text-gray-900">Photos</div>
-          {job.photos.length > 0 ? (
-            <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {job.photos.map((p) => (
-                <a key={p.id} href={p.signedUrl} target="_blank" rel="noreferrer" className="block">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={p.signedUrl}
-                    alt={p.label || 'Job photo'}
-                    className="aspect-square w-full rounded-md border border-gray-200 object-cover"
-                  />
-                </a>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-2 text-sm text-gray-700">No photos uploaded.</div>
-          )}
-        </div>
-
-        <div className="mt-6">
-          <div className="text-sm font-semibold text-gray-900">Documents</div>
-          {job.documents.length > 0 ? (
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-              {job.documents.map((d) => (
-                <li key={d.id}>
-                  <a className="text-blue-700 underline" href={d.signedUrl} target="_blank" rel="noreferrer">
-                    {d.name}
-                  </a>
-                  <span className="text-gray-500"> ({d.kind})</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="mt-2 text-sm text-gray-700">No documents uploaded.</div>
-          )}
-        </div>
-      </section>
-    </main>
+      <StickyActionBar jobId={viewModel.id} role={viewModel.role} isOwner={viewModel.isOwner} />
+    </div>
   );
 }
