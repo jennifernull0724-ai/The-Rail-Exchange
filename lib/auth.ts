@@ -1,95 +1,59 @@
 import 'server-only';
 
-export type UserRole = 'logistics_company' | 'contractor';
+import { dbQuery } from '@/lib/db';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
+
+export type UserRole = 'admin' | 'contractor' | 'logistics';
 
 export type ServerAuthContext = {
   userId: string;
   role: UserRole;
-  companyId: string;
-  subscriptionActive: boolean;
+  isOwner: boolean;
+  disabled: boolean;
 };
 
 export class AuthContextError extends Error {
   override name = 'AuthContextError';
 }
 
-type RequestLike = {
-  headers: Headers;
+type UserRow = {
+	role: string;
+	is_owner: boolean;
+	disabled: boolean;
 };
-
-declare const process: {
-  env: Record<string, string | undefined>;
-};
-
-function isNonEmptyNoWhitespace(value: string): boolean {
-  if (value.trim().length === 0) return false;
-  return !/\s/.test(value);
-}
-
-function requireHeader(headers: Headers, name: string): string {
-  const value = headers.get(name);
-  if (value === null) {
-    throw new AuthContextError(`Missing required auth header: ${name}`);
-  }
-  const trimmed = value.trim();
-  if (!isNonEmptyNoWhitespace(trimmed)) {
-    throw new AuthContextError(`Invalid auth header ${name}: must be a non-empty value with no whitespace`);
-  }
-  return trimmed;
-}
-
-function isMissingHeaderError(err: unknown): err is AuthContextError {
-  return err instanceof AuthContextError && err.message.startsWith('Missing required auth header:');
-}
-
-function requireDevEnv(name: 'DEV_USER_ID' | 'DEV_USER_ROLE' | 'DEV_COMPANY_ID' | 'DEV_SUBSCRIPTION_ACTIVE'): string {
-  const value = process.env[name];
-  if (value === undefined || value.trim().length === 0) {
-    throw new AuthContextError(`DEV auth bridge blocked: missing required env var ${name}`);
-  }
-  const trimmed = value.trim();
-  if (!isNonEmptyNoWhitespace(trimmed)) {
-    throw new AuthContextError(`DEV auth bridge blocked: invalid env var ${name} (must be non-empty with no whitespace)`);
-  }
-  return trimmed;
-}
 
 function parseUserRole(value: string): UserRole {
-  if (value === 'logistics_company' || value === 'contractor') return value;
-  throw new AuthContextError('Invalid auth header x-user-role: must be "logistics_company" or "contractor"');
-}
-
-function parseSubscriptionActive(value: string): boolean {
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  throw new AuthContextError('Invalid auth header x-subscription-active: must be "true" or "false"');
+	if (value === 'admin' || value === 'contractor' || value === 'logistics') return value;
+	if (value === 'logistics_company') return 'logistics';
+	throw new AuthContextError('BLOCKED: Invalid user role.');
 }
 
 /**
  * Server-only auth context accessor.
  *
- * Identity enters the backend ONLY via required request headers.
+ * Identity is sourced from the Supabase session cookie; authorization is sourced from the app DB.
  */
-export function getServerAuthContext(req: Request | RequestLike): ServerAuthContext {
-  const headers = req.headers;
+export async function getServerAuthContext(): Promise<ServerAuthContext> {
+	const supabase = getSupabaseServerClient();
+	const { data, error } = await supabase.auth.getUser();
+	if (error || !data.user) {
+		throw new AuthContextError('BLOCKED: Not authenticated.');
+	}
 
-  try {
-    const userId = requireHeader(headers, 'x-user-id');
-    const role = parseUserRole(requireHeader(headers, 'x-user-role'));
-    const companyId = requireHeader(headers, 'x-company-id');
-    const subscriptionActive = parseSubscriptionActive(requireHeader(headers, 'x-subscription-active'));
+	const userId = data.user.id;
+	const result = await dbQuery<UserRow>(
+		`SELECT role, is_owner, disabled FROM users WHERE id::text = $1 LIMIT 1`,
+		[userId],
+	);
+	const row = result.rows[0];
+	if (!row) {
+		throw new AuthContextError('BLOCKED: User not provisioned.');
+	}
 
-    return { userId, role, companyId, subscriptionActive };
-  } catch (err) {
-    if (isMissingHeaderError(err) && process.env.NODE_ENV === 'development') {
-      const userId = requireDevEnv('DEV_USER_ID');
-      const role = parseUserRole(requireDevEnv('DEV_USER_ROLE'));
-      const companyId = requireDevEnv('DEV_COMPANY_ID');
-      const subscriptionActive = parseSubscriptionActive(requireDevEnv('DEV_SUBSCRIPTION_ACTIVE'));
-
-      return { userId, role, companyId, subscriptionActive };
-    }
-
-    throw err;
-  }
+	return {
+		userId,
+		role: parseUserRole(row.role),
+		isOwner: row.is_owner,
+		disabled: row.disabled,
+	};
 }

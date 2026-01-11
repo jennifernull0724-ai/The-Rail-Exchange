@@ -8,7 +8,7 @@ import { getOpenJobRequestsForContractor } from '@/lib/repositories/jobRequests.
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const access = ensureContractorAccess();
+  const access = await ensureContractorAccess();
   if (!access.authorized) {
     return NextResponse.json(
       { error: `Access denied: ${access.reason ?? 'Authorization not implemented.'}` },

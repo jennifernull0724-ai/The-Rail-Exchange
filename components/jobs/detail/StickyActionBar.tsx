@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-export function StickyActionBar({ jobId, role, isOwner }: { jobId: string; role: 'contractor' | 'logistics_company'; isOwner: boolean }) {
+export function StickyActionBar({ jobId, role, isOwner }: { jobId: string; role: 'admin' | 'contractor' | 'logistics'; isOwner: boolean }) {
   const [pricingOpen, setPricingOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
 

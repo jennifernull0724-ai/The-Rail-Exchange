@@ -81,7 +81,7 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
 
   let auth;
   try {
-    auth = getServerAuthContext(req);
+    auth = await getServerAuthContext();
   } catch (err) {
     return forbidden(err instanceof Error ? err.message : 'Invalid auth context headers.');
   }
@@ -98,19 +98,21 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
     return NextResponse.json({ error: 'Job request not found.' }, { status: 404 });
   }
 
-  if (auth.role === 'contractor') {
-    if (auth.subscriptionActive !== true) {
-      return forbidden('Access denied: contractor subscription is not active.');
+  if (!auth.isOwner) {
+    if (auth.disabled) {
+      return forbidden('Access denied: user disabled.');
     }
-    if (job.status !== 'open') {
-      return forbidden('Access denied: contractors can only view open job requests.');
+    if (auth.role === 'contractor') {
+      if (job.status !== 'open') {
+        return forbidden('Access denied: contractors can only view open job requests.');
+      }
+    } else if (auth.role === 'logistics') {
+      // Ownership checks are not implemented in the current data model.
+    } else if (auth.role === 'admin') {
+      // Admins can view.
+    } else {
+      return forbidden('Access denied: unknown role.');
     }
-  } else if (auth.role === 'logistics_company') {
-    if (auth.companyId !== job.ownerCompanyId) {
-      return forbidden('Access denied: logistics company does not own this job request.');
-    }
-  } else {
-    return forbidden('Access denied: unknown role.');
   }
 
   const bucket = process.env.FILE_STORAGE_BUCKET;

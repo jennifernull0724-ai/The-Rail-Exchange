@@ -1,6 +1,5 @@
 import 'server-only';
 
-import { headers as nextHeaders } from 'next/headers';
 import { getServerAuthContext } from '@/lib/auth';
 
 export interface AccessDecision {
@@ -9,16 +8,10 @@ export interface AccessDecision {
   reason?: string;
 }
 
-type RequestLike = { headers: Headers };
-
-function getAuthContext(req?: Request | RequestLike) {
-  return getServerAuthContext(req ?? { headers: nextHeaders() });
-}
-
-export function ensureLogisticsCompanyAccess(req?: Request | RequestLike, ownerCompanyId?: string): AccessDecision {
-  let context: ReturnType<typeof getAuthContext>;
+export async function ensureLogisticsCompanyAccess(_req?: Request, _ownerCompanyId?: string): Promise<AccessDecision> {
+	let context: Awaited<ReturnType<typeof getServerAuthContext>>;
   try {
-    context = getAuthContext(req);
+		context = await getServerAuthContext();
   } catch (err) {
     return {
       authorized: false,
@@ -27,7 +20,11 @@ export function ensureLogisticsCompanyAccess(req?: Request | RequestLike, ownerC
     };
   }
 
-  if (context.role !== 'logistics_company') {
+	if (context.isOwner) {
+		return { authorized: true, status: 200 };
+	}
+
+	if (context.role !== 'logistics') {
     return {
       authorized: false,
       status: 403,
@@ -35,21 +32,13 @@ export function ensureLogisticsCompanyAccess(req?: Request | RequestLike, ownerC
     };
   }
 
-  if (ownerCompanyId && context.companyId !== ownerCompanyId) {
-    return {
-      authorized: false,
-      status: 403,
-      reason: 'Access denied: logistics company does not own this resource.',
-    };
-  }
-
   return { authorized: true, status: 200 };
 }
 
-export function ensureContractorAccess(req?: Request | RequestLike): AccessDecision {
-  let context: ReturnType<typeof getAuthContext>;
+export async function ensureContractorAccess(_req?: Request): Promise<AccessDecision> {
+	let context: Awaited<ReturnType<typeof getServerAuthContext>>;
   try {
-    context = getAuthContext(req);
+		context = await getServerAuthContext();
   } catch (err) {
     return {
       authorized: false,
@@ -58,19 +47,15 @@ export function ensureContractorAccess(req?: Request | RequestLike): AccessDecis
     };
   }
 
+	if (context.isOwner) {
+		return { authorized: true, status: 200 };
+	}
+
   if (context.role !== 'contractor') {
     return {
       authorized: false,
       status: 403,
       reason: 'Only contractors can view open requests.',
-    };
-  }
-
-  if (!context.subscriptionActive) {
-    return {
-      authorized: false,
-      status: 403,
-      reason: 'Active subscription required to view open requests.',
     };
   }
 

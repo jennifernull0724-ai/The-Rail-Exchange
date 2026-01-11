@@ -20,10 +20,22 @@ const REQUIRED_ENV_KEYS = [
   'BILLING_WEBHOOK_SECRET',
 ] as const;
 
+function applyEnvAliases(): void {
+  // Keep the app config stable while allowing provider-specific env naming.
+  if ((process.env.EMAIL_API_KEY === undefined || process.env.EMAIL_API_KEY.trim() === '') && process.env.EMAIL_PROVIDER === 'sendgrid') {
+    const sendgridKey = process.env.SENDGRID_API_KEY;
+    if (sendgridKey !== undefined && sendgridKey.trim() !== '') {
+      process.env.EMAIL_API_KEY = sendgridKey;
+    }
+  }
+}
+
 function validateRequiredEnv(): void {
   if (typeof window !== 'undefined') {
     throw new Error('lib/env.ts must never execute in the browser.');
   }
+
+  applyEnvAliases();
 
   const missing = REQUIRED_ENV_KEYS.filter((key) => {
     const value = process.env[key];

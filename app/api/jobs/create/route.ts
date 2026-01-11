@@ -39,7 +39,7 @@ function badRequest(message: string) {
 }
 
 export async function POST(req: Request) {
-  const access = ensureLogisticsCompanyAccess();
+  const access = await ensureLogisticsCompanyAccess();
   if (!access.authorized) {
     return NextResponse.json(
       { error: `Access denied: ${access.reason ?? 'Authorization not implemented.'}` },

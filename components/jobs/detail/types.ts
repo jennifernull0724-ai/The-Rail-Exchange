@@ -36,5 +36,5 @@ export type JobDetailViewModel = {
   photos: Array<{ src: string; alt: string }>;
 
   isOwner: boolean;
-  role: 'contractor' | 'logistics_company';
+  role: 'admin' | 'contractor' | 'logistics';
 };
