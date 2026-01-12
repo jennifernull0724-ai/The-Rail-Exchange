@@ -10,8 +10,8 @@ export const revalidate = 0;
 export default async function HomePage() {
   try {
     const auth = await getServerAuthContext();
-    if (auth.isOwner) redirect('/admin');
-    if (auth.role === 'admin') redirect('/admin');
+    if (auth.isOwner) redirect('/jobs');
+    if (auth.role === 'admin') redirect('/jobs');
     if (auth.role === 'contractor') redirect('/jobs');
     if (auth.role === 'logistics') redirect('/company');
   } catch (err) {

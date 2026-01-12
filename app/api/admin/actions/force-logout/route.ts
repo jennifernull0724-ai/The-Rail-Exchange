@@ -1,7 +1,5 @@
 import 'server-only';
 
-import '@/lib/env';
-
 import { NextResponse } from 'next/server';
 
 import { requireAdmin } from '@/lib/admin/guard';

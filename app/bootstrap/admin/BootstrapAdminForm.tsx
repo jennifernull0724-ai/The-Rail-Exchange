@@ -36,12 +36,18 @@ export function BootstrapAdminForm() {
 	}
 
 	return (
-		<form onSubmit={onSubmit} className="space-y-4">
+		<form
+			action="/api/bootstrap/create-admin"
+			method="post"
+			onSubmit={onSubmit}
+			className="space-y-4"
+		>
 			<div>
 				<label className="block text-sm font-medium text-gray-900">
 					Email
 				</label>
 				<input
+					name="email"
 					type="email"
 					required
 					value={email}
@@ -55,6 +61,7 @@ export function BootstrapAdminForm() {
 					Password
 				</label>
 				<input
+					name="password"
 					type="password"
 					required
 					value={password}

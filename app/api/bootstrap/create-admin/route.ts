@@ -18,9 +18,11 @@ function normalizeEmail(email: string): string {
 export async function POST(req: Request) {
 	let email: string | null = null;
 	let password: string | null = null;
+	let isJsonRequest = false;
 
 	try {
 		const contentType = req.headers.get('content-type') ?? '';
+		isJsonRequest = contentType.includes('application/json');
 		if (contentType.includes('application/json')) {
 			const body = (await req.json()) as { email?: unknown; password?: unknown };
 			email = typeof body.email === 'string' ? normalizeEmail(body.email) : null;
@@ -36,8 +38,18 @@ export async function POST(req: Request) {
 		return jsonBlocked('Invalid request body.', 400);
 	}
 
-	if (!email || email.length === 0) return jsonBlocked('Email is required.', 400);
-	if (!password || password.length === 0) return jsonBlocked('Password is required.', 400);
+	if (!email || email.length === 0) {
+		if (!isJsonRequest) {
+			return NextResponse.redirect(new URL('/bootstrap/admin?error=Email%20is%20required.', req.url), 303);
+		}
+		return jsonBlocked('Email is required.', 400);
+	}
+	if (!password || password.length === 0) {
+		if (!isJsonRequest) {
+			return NextResponse.redirect(new URL('/bootstrap/admin?error=Password%20is%20required.', req.url), 303);
+		}
+		return jsonBlocked('Password is required.', 400);
+	}
 
 	// 1..6 per spec. Use a DB transaction for single-init guarantee.
 	const supabaseAdmin = getSupabaseAdminClient();
@@ -85,6 +97,9 @@ export async function POST(req: Request) {
 			);
 		});
 
+		if (!isJsonRequest) {
+			return NextResponse.redirect(new URL('/bootstrap/admin?created=1', req.url), 303);
+		}
 		return NextResponse.json({ ok: true }, { status: 200 });
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -99,9 +114,18 @@ export async function POST(req: Request) {
 		}
 
 		if (message === 'System already initialized.') {
+			if (!isJsonRequest) {
+				return NextResponse.redirect(
+					new URL('/bootstrap/admin?error=System%20already%20initialized.', req.url),
+					303,
+				);
+			}
 			return jsonBlocked('System already initialized.', 403);
 		}
-
+		if (!isJsonRequest) {
+			// Avoid leaking internal details on non-JSON form posts.
+			return NextResponse.redirect(new URL('/bootstrap/admin?error=Create%20admin%20failed.', req.url), 303);
+		}
 		return jsonBlocked(message, 500);
 	}
 }

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import '@/lib/env';
+import { getEnv } from '@/lib/env';
 
 declare const process: {
   env: Record<string, string | undefined>;
@@ -21,7 +21,7 @@ export async function getSignedReadUrl({ bucket, key, expiresInSeconds }: Signed
     throw new Error('getSignedReadUrl must never execute in the browser.');
   }
 
-  if (process.env.FILE_STORAGE_PROVIDER !== 'aws_s3') {
+  if (getEnv('FILE_STORAGE_PROVIDER') !== 'aws_s3') {
     throw new Error('Signed read URLs blocked: FILE_STORAGE_PROVIDER is not aws_s3.');
   }
 
@@ -33,9 +33,9 @@ export async function getSignedReadUrl({ bucket, key, expiresInSeconds }: Signed
     throw new Error('Signed read URL failed: key is required.');
   }
 
-  const region = process.env.FILE_STORAGE_REGION;
-  const accessKeyId = process.env.FILE_STORAGE_ACCESS_KEY;
-  const secretAccessKey = process.env.FILE_STORAGE_SECRET_KEY;
+  const region = getEnv('FILE_STORAGE_REGION');
+  const accessKeyId = getEnv('FILE_STORAGE_ACCESS_KEY');
+  const secretAccessKey = getEnv('FILE_STORAGE_SECRET_KEY');
 
   if (!isNonEmptyString(region)) {
     throw new Error('Signed read URLs blocked: FILE_STORAGE_REGION is missing.');

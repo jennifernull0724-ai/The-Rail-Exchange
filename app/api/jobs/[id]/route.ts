@@ -1,27 +1,24 @@
 import 'server-only';
-
-import '@/lib/env';
 import { NextResponse } from 'next/server';
 import { getServerAuthContext } from '@/lib/auth';
-import { getSignedReadUrl } from '@/lib/storage/readUrl';
 import { prisma } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
 function badRequest(message: string) {
-  return NextResponse.json({ error: message }, { status: 400 });
+  return NextResponse.json({ error: 'BLOCKED', reason: 'invalid_request', message }, { status: 400 });
 }
 
 function unauthorized(message: string) {
-  return NextResponse.json({ error: message }, { status: 401 });
+  return NextResponse.json({ error: 'BLOCKED', reason: 'unauthorized', message }, { status: 401 });
 }
 
 function forbidden(message: string) {
-  return NextResponse.json({ error: message }, { status: 403 });
+  return NextResponse.json({ error: 'BLOCKED', reason: 'forbidden', message }, { status: 403 });
 }
 
 function serverError(message: string) {
-  return NextResponse.json({ error: message }, { status: 500 });
+  return NextResponse.json({ error: 'BLOCKED', reason: 'missing_dependency', message }, { status: 501 });
 }
 
 type JobPhotoResponse = {
@@ -83,7 +80,7 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
   try {
     auth = await getServerAuthContext();
   } catch (err) {
-    return forbidden(err instanceof Error ? err.message : 'Invalid auth context headers.');
+    return unauthorized(err instanceof Error ? err.message : 'Not authenticated.');
   }
 
   const job = await prisma.jobRequest.findUnique({
@@ -95,7 +92,10 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
   });
 
   if (!job) {
-    return NextResponse.json({ error: 'Job request not found.' }, { status: 404 });
+    return NextResponse.json(
+      { error: 'BLOCKED', reason: 'invalid_request', message: 'Job request not found.' },
+      { status: 404 },
+    );
   }
 
   if (!auth.isOwner) {
@@ -115,29 +115,14 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
     }
   }
 
-  const bucket = process.env.FILE_STORAGE_BUCKET;
-  if (!bucket) {
-    return serverError('BLOCKED: FILE_STORAGE_BUCKET missing; cannot generate signed read URLs.');
-  }
-
   let photos: JobPhotoResponse[];
   let documents: JobDocumentResponse[];
   try {
-    photos = await Promise.all(
-      job.photos.map(async (p) => {
-        const signedUrl = await getSignedReadUrl({ bucket, key: p.s3Key, expiresInSeconds: 60 });
-        return { id: p.id, label: p.label, signedUrl, createdAt: p.createdAt.toISOString() };
-      }),
-    );
-
-    documents = await Promise.all(
-      job.documents.map(async (d) => {
-        const signedUrl = await getSignedReadUrl({ bucket, key: d.s3Key, expiresInSeconds: 60 });
-        return { id: d.id, name: d.name, kind: d.kind, signedUrl, createdAt: d.createdAt.toISOString() };
-      }),
-    );
+    // Core product should not depend on external storage configuration.
+    photos = job.photos.map((p) => ({ id: p.id, label: p.label, signedUrl: '', createdAt: p.createdAt.toISOString() }));
+    documents = job.documents.map((d) => ({ id: d.id, name: d.name, kind: d.kind, signedUrl: '', createdAt: d.createdAt.toISOString() }));
   } catch (err) {
-    return serverError(`BLOCKED: Failed to generate signed read URLs. ${err instanceof Error ? err.message : String(err)}`);
+    return serverError(`Failed to load job attachments. ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const payload: JobRequestDetailResponse = {
@@ -175,4 +160,72 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
   };
 
   return NextResponse.json(payload, { status: 200 });
+}
+
+type PatchBody = { title?: unknown; scope?: unknown; status?: unknown };
+
+export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+  const jobRequestId = ctx?.params?.id;
+  if (!jobRequestId || typeof jobRequestId !== 'string' || jobRequestId.trim().length === 0) {
+    return badRequest('Invalid jobRequestId.');
+  }
+
+  let auth;
+  try {
+    auth = await getServerAuthContext();
+  } catch (err) {
+    return unauthorized(err instanceof Error ? err.message : 'Not authenticated.');
+  }
+
+  if (auth.disabled) {
+    return forbidden('Access denied: user disabled.');
+  }
+
+  let body: PatchBody;
+  try {
+    body = (await req.json()) as PatchBody;
+  } catch {
+    return badRequest('Invalid JSON body.');
+  }
+
+  const title = typeof body.title === 'string' ? body.title.trim() : undefined;
+  const scope = typeof body.scope === 'string' ? body.scope.trim() : undefined;
+  const statusRaw = typeof body.status === 'string' ? body.status.trim().toLowerCase() : undefined;
+  const status = statusRaw === 'open' || statusRaw === 'closed' ? statusRaw : undefined;
+
+  if (!title && !scope && !status) {
+    return badRequest('No supported fields provided (title, scope, status).');
+  }
+
+  try {
+    const job = await prisma.jobRequest.findUnique({ where: { id: jobRequestId }, select: { ownerCompanyId: true } });
+    if (!job) {
+      return NextResponse.json(
+        { error: 'BLOCKED', reason: 'invalid_request', message: 'Job request not found.' },
+        { status: 404 },
+      );
+    }
+
+    if (auth.role !== 'admin' && auth.role !== 'logistics') {
+      return forbidden('Access denied: logistics role required.');
+    }
+
+    if (auth.role !== 'admin' && job.ownerCompanyId !== auth.userId) {
+      return forbidden('Access denied: only the owning company can edit this job.');
+    }
+
+    const updated = await prisma.jobRequest.update({
+      where: { id: jobRequestId },
+      data: {
+        ...(title ? { title } : {}),
+        ...(scope ? { scopeDescription: scope } : {}),
+        ...(status ? { status } : {}),
+      },
+      select: { id: true, status: true },
+    });
+
+    return NextResponse.json({ ok: true, id: updated.id, status: updated.status }, { status: 200 });
+  } catch (err) {
+    return serverError(err instanceof Error ? err.message : String(err));
+  }
 }

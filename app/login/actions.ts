@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 
 import { dbQuery } from '@/lib/db';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { routeByRole } from '@/lib/auth/routeByRole';
 
 export type LoginActionState = { blocked?: string };
 
@@ -62,9 +63,8 @@ export async function signInAndRoute(
 		}
 
 		if (row.is_owner) redirect('/admin');
-		if (row.role === 'admin') redirect('/admin');
-		if (row.role === 'contractor') redirect('/profile');
-		if (row.role === 'logistics') redirect('/company');
+		// Locked routing rules (server-side only)
+		redirect(routeByRole({ role: row.role }));
 
 		await supabase.auth.signOut();
 		return { blocked: 'User role invalid.' };

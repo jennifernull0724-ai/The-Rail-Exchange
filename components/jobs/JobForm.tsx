@@ -3,7 +3,6 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { JobLocationConfirm } from './JobLocationConfirm';
-import { JobUploads } from './JobUploads';
 import { JobUrgency } from '@/lib/types';
 
 interface JobFormState {
@@ -16,6 +15,8 @@ interface JobFormState {
   startDate: string;
   duration: string;
   address: string;
+  city: string;
+  state: string;
   facilityNotes: string;
   complianceRequirements: string;
   equipmentNotes: string;
@@ -35,6 +36,8 @@ export function JobForm() {
     startDate: '',
     duration: '',
     address: '',
+    city: '',
+    state: '',
     facilityNotes: '',
     complianceRequirements: '',
     equipmentNotes: '',
@@ -64,12 +67,14 @@ export function JobForm() {
     const title = state.title.trim();
     const description = state.description.trim();
     const address = state.address.trim();
+    const city = state.city.trim();
+    const jobState = state.state.trim();
     const jobType = state.jobType.trim();
     const commodity = state.commodity.trim();
     const scope = state.scope.trim();
 
-    if (!title || !description || !address || !jobType || !commodity || !scope) {
-      setFormError('Missing required fields. Title, description, address, job type, commodity, and scope are required.');
+    if (!title || !description || !address || !city || !jobState || !jobType || !commodity || !scope) {
+      setFormError('Missing required fields. Title, description, address, city, state, job type, commodity, and scope are required.');
       return;
     }
 
@@ -92,6 +97,8 @@ export function JobForm() {
           urgency: state.urgency,
           startDate: state.urgency === 'scheduled' ? state.startDate : undefined,
           address,
+          city,
+          state: jobState,
           complianceRequirements: complianceList,
           equipmentNotes: state.equipmentNotes.trim() || undefined,
           laborNotes: state.laborNotes.trim() || undefined,
@@ -286,6 +293,39 @@ export function JobForm() {
       />
 
       <section className="rounded-md border border-gray-200 bg-white p-4 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-900">City & State</h2>
+        <p className="mb-4 text-sm text-gray-600">Used for the listing location label.</p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="block text-sm font-medium text-gray-800" htmlFor="job-city">
+              City
+            </label>
+            <input
+              id="job-city"
+              name="city"
+              value={state.city}
+              onChange={(e) => handleChange('city')(e.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 p-2 text-gray-900 shadow-sm focus:border-gray-500 focus:outline-none"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-800" htmlFor="job-state">
+              State
+            </label>
+            <input
+              id="job-state"
+              name="state"
+              value={state.state}
+              onChange={(e) => handleChange('state')(e.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 p-2 text-gray-900 shadow-sm focus:border-gray-500 focus:outline-none"
+              required
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-gray-200 bg-white p-4 shadow-sm">
         <h2 className="text-lg font-semibold text-gray-900">Requirements & Constraints</h2>
         <p className="mb-4 text-sm text-gray-600">List compliance, equipment, labor, and safety constraints.</p>
         <div className="space-y-4">
@@ -385,20 +425,9 @@ export function JobForm() {
         </div>
       </section>
 
-      <JobUploads
-        jobRequestId=""
-        mode="photos"
-        maxFileSizeBytes={25 * 1024 * 1024}
-        onUploaded={() => {
-          setFormError('Uploads blocked: create the job request first to get a jobRequestId.');
-        }}
-        provider={process.env.NEXT_PUBLIC_FILE_STORAGE_PROVIDER}
-        onBlocked={() => setFormError('Uploads blocked: create the job request first to get a jobRequestId.')}
-      />
-
       <section className="rounded-md border border-gray-200 bg-white p-4 shadow-sm">
         <h2 className="text-lg font-semibold text-gray-900">Publish Controls</h2>
-        <p className="mb-4 text-sm text-gray-600">Publish real jobs only. Submission is blocked until a live API is connected.</p>
+        <p className="mb-4 text-sm text-gray-600">Create the listing and publish it to the feed.</p>
         <div className="flex flex-wrap gap-3">
           <button
             type="submit"
@@ -406,13 +435,6 @@ export function JobForm() {
             className="rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed"
           >
             {submitting ? 'Publishing…' : 'Publish job'}
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveDraft}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-800 shadow-sm"
-          >
-            Save draft
           </button>
           <button
             type="button"

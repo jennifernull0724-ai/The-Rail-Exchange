@@ -20,11 +20,11 @@ export async function ensureLogisticsCompanyAccess(_req?: Request, _ownerCompany
     };
   }
 
-	if (context.isOwner) {
-		return { authorized: true, status: 200 };
-	}
+  if (context.isOwner) {
+    return { authorized: true, status: 200 };
+  }
 
-	if (context.role !== 'logistics') {
+  if (context.role !== 'logistics' && context.role !== 'admin') {
     return {
       authorized: false,
       status: 403,
@@ -51,7 +51,7 @@ export async function ensureContractorAccess(_req?: Request): Promise<AccessDeci
 		return { authorized: true, status: 200 };
 	}
 
-  if (context.role !== 'contractor') {
+  if (context.role !== 'contractor' && context.role !== 'admin') {
     return {
       authorized: false,
       status: 403,

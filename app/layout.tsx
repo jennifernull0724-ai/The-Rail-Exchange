@@ -1,5 +1,3 @@
-import '@/lib/env';
-
 import './globals.css';
 
 import type { ReactNode } from 'react';

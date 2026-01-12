@@ -1,18 +1,17 @@
 import 'server-only';
-
-import '@/lib/env';
 import { NextResponse } from 'next/server';
-import { ensureContractorAccess } from '@/lib/permissions';
+import { getServerAuthContext } from '@/lib/auth';
 import { getOpenJobRequestsForContractor } from '@/lib/repositories/jobRequests.read';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const access = await ensureContractorAccess();
-  if (!access.authorized) {
+  try {
+    await getServerAuthContext();
+  } catch (err) {
     return NextResponse.json(
-      { error: `Access denied: ${access.reason ?? 'Authorization not implemented.'}` },
-      { status: access.status },
+      { error: err instanceof Error ? err.message : 'Not authenticated.' },
+      { status: 401 },
     );
   }
 

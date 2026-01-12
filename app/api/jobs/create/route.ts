@@ -1,8 +1,7 @@
 import 'server-only';
-
-import '@/lib/env';
 import { NextResponse } from 'next/server';
-import { ensureLogisticsCompanyAccess } from '@/lib/permissions';
+import { getServerAuthContext } from '@/lib/auth';
+import { prisma } from '@/lib/db';
 import type { JobUrgency } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -16,14 +15,12 @@ type CreateJobRequestInput = {
   urgency: JobUrgency;
   startDate?: string;
   address: string;
+  city: string;
+  state: string;
   complianceRequirements: string[];
   equipmentNotes?: string;
   laborNotes?: string;
   pricingExpectation?: string;
-  location?: {
-    lat: number;
-    lng: number;
-  };
 };
 
 function isNonEmptyString(value: unknown): value is string {
@@ -39,12 +36,22 @@ function badRequest(message: string) {
 }
 
 export async function POST(req: Request) {
-  const access = await ensureLogisticsCompanyAccess();
-  if (!access.authorized) {
+  let auth;
+  try {
+    auth = await getServerAuthContext();
+  } catch (err) {
     return NextResponse.json(
-      { error: `Access denied: ${access.reason ?? 'Authorization not implemented.'}` },
-      { status: access.status },
+      { error: err instanceof Error ? err.message : 'Not authenticated.' },
+      { status: 401 },
     );
+  }
+
+  if (auth.disabled) {
+    return NextResponse.json({ error: 'Access denied: user disabled.' }, { status: 403 });
+  }
+
+  if (auth.role !== 'logistics' && auth.role !== 'admin') {
+    return NextResponse.json({ error: 'Access denied: logistics or admin role required to post jobs.' }, { status: 403 });
   }
 
   let body: unknown;
@@ -69,17 +76,12 @@ export async function POST(req: Request) {
     urgency: raw.urgency as JobUrgency,
     startDate: typeof raw.startDate === 'string' ? raw.startDate : undefined,
     address: String(raw.address ?? ''),
+    city: String(raw.city ?? ''),
+    state: String(raw.state ?? ''),
     complianceRequirements: isStringArray(raw.complianceRequirements) ? raw.complianceRequirements : [],
     equipmentNotes: typeof raw.equipmentNotes === 'string' ? raw.equipmentNotes : undefined,
     laborNotes: typeof raw.laborNotes === 'string' ? raw.laborNotes : undefined,
     pricingExpectation: typeof raw.pricingExpectation === 'string' ? raw.pricingExpectation : undefined,
-    location:
-      raw.location && typeof raw.location === 'object'
-        ? {
-            lat: Number((raw.location as Record<string, unknown>).lat),
-            lng: Number((raw.location as Record<string, unknown>).lng),
-          }
-        : undefined,
   };
 
   if (!isNonEmptyString(input.title)) return badRequest('Missing required field: title.');
@@ -92,22 +94,38 @@ export async function POST(req: Request) {
     return badRequest('Missing required field: startDate (scheduled jobs).');
   }
   if (!isNonEmptyString(input.address)) return badRequest('Missing required field: address.');
+  if (!isNonEmptyString(input.city)) return badRequest('Missing required field: city.');
+  if (!isNonEmptyString(input.state)) return badRequest('Missing required field: state.');
 
-  if (!input.location || !Number.isFinite(input.location.lat) || !Number.isFinite(input.location.lng)) {
-    return NextResponse.json(
-      {
-        error:
-          'BLOCKED: JobRequest schema requires location.lat/lng. Provide real coordinates or implement server-side geocoding (not implemented).',
-      },
-      { status: 501 },
-    );
+  const startDate = input.urgency === 'scheduled' && input.startDate ? new Date(input.startDate) : null;
+  if (startDate && Number.isNaN(startDate.getTime())) {
+    return badRequest('Invalid startDate. Expected YYYY-MM-DD.');
   }
 
-  return NextResponse.json(
-    {
-      error:
-        'BLOCKED: No real persistence layer is declared in this codebase (no database schema/client). Implement a real DB write and return the created jobRequestId.',
+  const created = await prisma.jobRequest.create({
+    data: {
+      ownerCompanyId: auth.userId,
+      title: input.title.trim(),
+      jobType: input.jobType.trim(),
+      commodity: input.commodity.trim(),
+      urgency: input.urgency,
+      scopeDescription: input.scope.trim(),
+      descriptionFull: input.description.trim(),
+      status: 'open',
+      startDate: startDate ?? undefined,
+      expectedDuration: undefined,
+      address: input.address.trim(),
+      city: input.city.trim(),
+      state: input.state.trim(),
+      latitude: 0,
+      longitude: 0,
+      complianceRequirements: input.complianceRequirements,
+      equipmentNotes: input.equipmentNotes?.trim() || undefined,
+      laborNotes: input.laborNotes?.trim() || undefined,
+      pricingExpectation: input.pricingExpectation?.trim() || undefined,
     },
-    { status: 501 },
-  );
+    select: { id: true },
+  });
+
+  return NextResponse.json({ jobRequestId: created.id }, { status: 200 });
 }

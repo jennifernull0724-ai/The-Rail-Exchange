@@ -15,15 +15,20 @@ async function getRole(): Promise<string | null> {
 
 export async function AppFooter() {
   const role = await getRole();
-  const showAdmin = role === 'admin';
+  const isAdmin = role === 'admin';
+  const isAuthed = role !== null;
 
   return (
     <footer className="fixed bottom-0 left-0 right-0 border-t bg-white">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 text-xs text-gray-700">
         <div className="min-w-[80px]">
-          {showAdmin ? (
+          {isAdmin ? (
             <Link href="/admin" className="underline text-gray-900">
               Admin
+            </Link>
+          ) : !isAuthed ? (
+            <Link href="/login" className="underline text-gray-900">
+              Admin Login
             </Link>
           ) : null}
         </div>

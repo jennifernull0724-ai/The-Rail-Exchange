@@ -92,10 +92,26 @@ export default async function ProfilePage() {
   let authBlockedReason: string | null = null;
   try {
     auth = await getServerAuthContext();
-  } catch (err) {
+  } catch (err: any) {
     authBlockedReason = err instanceof Error ? err.message : String(err);
   }
 
+  return (
+    <main className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-7xl px-4 py-8 space-y-6">
+        <h1 className="text-2xl font-semibold text-gray-900">Profile</h1>
+        {authBlockedReason ? (
+          <div className="bg-white border rounded-lg p-6 text-sm text-gray-800">BLOCKED: {authBlockedReason}</div>
+        ) : (
+          <div className="bg-white border rounded-lg p-6 text-sm text-gray-800">
+            NOT IMPLEMENTED: Profile UI is not available yet. ({auth?.role ?? 'unknown'})
+          </div>
+        )}
+      </div>
+    </main>
+  );
+
+  /*
   const isContractor = auth?.role === 'contractor';
 
   const headerTitle = isContractor ? 'Contractor Profile' : 'Profile';
@@ -103,15 +119,7 @@ export default async function ProfilePage() {
 
   const actions = isContractor ? (
     <>
-      <Link href="/profile/edit" className="underline">
-        Edit
-      </Link>
-      <Link href="/messages" className="underline">
-        Inbox
-      </Link>
-      <Link href="/notifications" className="underline">
-        Notifications
-      </Link>
+      <span className="text-gray-500">NOT IMPLEMENTED</span>
     </>
   ) : null;
 
@@ -141,7 +149,7 @@ export default async function ProfilePage() {
           "contactEmail" as "contactEmail",
           "contactPhone" as "contactPhone"
         FROM "ContractorProfile"
-        WHERE "userId" = ${auth.userId}
+        WHERE "userId" = ${auth!.userId}
         LIMIT 1
       `) as ContractorProfileRow[];
 
@@ -208,7 +216,7 @@ export default async function ProfilePage() {
             .then((rows) => (rows as Array<{ count: number }>)[0]?.count ?? 0),
         ]);
       }
-    } catch (err) {
+    } catch (err: any) {
       dataBlockedReason = err instanceof Error ? err.message : String(err);
     }
   }
@@ -631,4 +639,5 @@ export default async function ProfilePage() {
       </div>
     </main>
   );
+	*/
 }
